@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import tensorflow as tf
 from typing import Optional
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
@@ -10,12 +11,13 @@ class EnvRunner:
     """An environment runner to locally collect data from vectorized gym environments.
     """
 
-    def __init__(self, config: AlgorithmConfig, max_seq_len: int = 100):
+    def __init__(self, model, config: AlgorithmConfig, max_seq_len: int = 100):
         """Initializes an EnvRunner instance.
 
         Args:
             config: The config to use to setup this EnvRunner.
         """
+        self.model = model
         self.config = config
         self.max_seq_len = max_seq_len
         self.env = gym.vector.make(
@@ -30,7 +32,7 @@ class EnvRunner:
         self.rewards = [[] for _ in range(self.env.num_envs)]
         self.episode_lengths = [0, 0]
 
-    def sample(self, explore: bool = True):
+    def sample(self, explore: bool = True, random_actions: bool = False):
         if self.config.batch_mode == "complete_episodes":
             raise NotImplementedError
         else:
@@ -40,6 +42,7 @@ class EnvRunner:
                     * self.config.num_envs_per_worker
                 ),
                 explore=explore,
+                random_actions=random_actions,
                 force_reset=False,
             )
 
@@ -47,6 +50,7 @@ class EnvRunner:
         self,
         num_timesteps: int,
         explore: bool = True,
+        random_actions: bool = False,
         force_reset: bool = False,
     ) -> MultiAgentBatch:
         """Runs n timesteps on the environment(s) and returns experiences.
@@ -80,7 +84,16 @@ class EnvRunner:
                 self.observations[i].append(o)
 
         while True:
-            actions = self.env.action_space.sample()
+            if random_actions:
+                actions = self.env.action_space.sample()
+            else:
+                action_logits = self.model(obs)
+                # Sample.
+                if explore:
+                    actions = tf.random.categorical(action_logits, num_samples=1)
+                # Greedy.
+                else:
+                    actions = np.argmax(action_logits, axis=-1)
 
             obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
 
@@ -155,4 +168,4 @@ if __name__ == "__main__":
         .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
     )
     env_runner = EnvRunner(config=config)
-    print(env_runner.sample())
+    print(env_runner.sample(random_actions=True))

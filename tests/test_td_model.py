@@ -54,11 +54,10 @@ config = (
     .environment("CountingCartPole-v0")
     .rollouts(rollout_fragment_length=1000, num_envs_per_worker=2)
 )
-env_runner = EnvRunner(config=config, max_seq_len=max_seq_len)
 
 model = AttentionIsAllYouNeedModel(
     use_embedding=False,  # CartPole doesn't need embedding
-    input_dim=env_runner.env.single_observation_space.shape[0] + env_runner.env.single_action_space.n,
+    input_dim=5 + 2,  # 5=observation dim, 2=num discrete actions
     max_seq_len=max_seq_len - 1,  # -1 b/c we need to extract next obs from data
     num_encoder_units=2,
     num_decoder_units=2,
@@ -67,11 +66,14 @@ model = AttentionIsAllYouNeedModel(
     dim_inner_ffn=256,
     dropout_rate=0.0,
 )
+
+env_runner = EnvRunner(model=model, config=config, max_seq_len=max_seq_len)
+
 num_iterations = 100
 
 for iteration in range(num_iterations):
     # Gather some data from the environment.
-    observation_batch, action_batch, reward_batch, masks = env_runner.sample()
+    observation_batch, action_batch, reward_batch, masks = env_runner.sample(random_actions=iteration < 0)
     # Concatenate observations and actions per timestep.
     input_batch = np.concatenate(
         [
